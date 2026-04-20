@@ -59,6 +59,9 @@ importers:
       pinia:
         specifier: ^3.0.4
         version: 3.0.4(typescript@5.9.3)(vue@3.5.31(typescript@5.9.3))
+      trezor-algorand-js:
+        specifier: file:../trezor-algorand-js
+        version: file:../trezor-algorand-js
       vue:
         specifier: ^3.5.31
         version: 3.5.31(typescript@5.9.3)
@@ -3036,6 +3039,9 @@ packages:
 
   tr46@1.0.1:
     resolution: {integrity: sha512-dTpowEjclQ7Kgx5SdBkqRzVhERQXov8/l9Ft9dVM9fmg0W0KQSVaXX9T4i6twCPNtYiZM53lpSSUAwJbFPOHxA==}
+
+  trezor-algorand-js@file:../trezor-algorand-js:
+    resolution: {directory: ../trezor-algorand-js, type: directory}
 
   ts-api-utils@2.5.0:
     resolution: {integrity: sha512-OJ/ibxhPlqrMM0UiNHJ/0CKQkoKF243/AEmplt3qpRgkW8VG7IfOS41h7V8TjITqdByHzrjcS/2si+y4lIh8NA==}
@@ -6703,6 +6709,8 @@ snapshots:
   tr46@1.0.1:
     dependencies:
       punycode: 2.3.1
+
+  trezor-algorand-js@file:../trezor-algorand-js: {}
 
   ts-api-utils@2.5.0(typescript@5.9.3):
     dependencies:
