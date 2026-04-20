@@ -2,9 +2,15 @@ import HdWallet from "@/services/HdWallet";
 import Seed from "@/services/Seed";
 import type { Siwa } from "@/types";
 import { selectDevice, sendOrPostMessage } from "@/utils";
+import { mapTrezorError } from "@/utils/hwSigners";
 import { hotSign } from "@/utils/signers";
 import TransportWebHID from "@ledgerhq/hw-transport-webhid";
 import TransportWebUSB from "@ledgerhq/hw-transport-webusb";
+import {
+  TrezorAlgorandClient,
+  WebUsbTransport,
+  defaultAlgorandPath,
+} from "trezor-algorand-js";
 import { Address } from "algosdk";
 import { canonify } from "canonify";
 import {
@@ -198,6 +204,34 @@ export default class LuteData {
           acct?.info?.addrIdx
         );
         seed.fill(0);
+      } else if (acct?.slot != null && acct.vendor === "trezor") {
+        if (this.siwa.account_address !== acct.addr) {
+          throw Error(
+            "Trezor does not yet support signing for rekeyed accounts"
+          );
+        }
+        let client: TrezorAlgorandClient | undefined;
+        try {
+          const existing = await WebUsbTransport.getFirst();
+          const transport = existing ?? (await WebUsbTransport.request());
+          client = await TrezorAlgorandClient.connect(transport);
+          this.store.setSnackbar("Review on Trezor...", "info", -1);
+          signature = await client.signData({
+            path: defaultAlgorandPath(acct.slot),
+            data: Buffer.from(this.jsonString, "utf8"),
+            domain: this.siwa.domain,
+            authData: this.authenticatorData,
+            requestId: this.siwa["request-id"],
+          });
+        } catch (err) {
+          throw mapTrezorError(err);
+        } finally {
+          try {
+            await client?.close();
+          } catch {
+            // ignore
+          }
+        }
       } else if (acct?.slot != null) {
         signData.hdPath = `m/44'/283'/${acct.slot}'/0/0`;
         await this.store.getDevices();
