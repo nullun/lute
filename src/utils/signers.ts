@@ -4,13 +4,13 @@ import Algo from "@/services/Algo";
 import Falcon from "@/services/Falcon";
 import HdWallet from "@/services/HdWallet";
 import Seed from "@/services/Seed";
-import type { LuteMsig, WalletTransaction } from "@/types";
-import { selectDevice } from "@/utils";
-import TransportWebHID from "@ledgerhq/hw-transport-webhid";
-import TransportWebUSB from "@ledgerhq/hw-transport-webusb";
+import type { HardwareVendor, LuteMsig, WalletTransaction } from "@/types";
+import {
+  createHardwareSigner,
+  type AlgorandHardwareSigner,
+} from "@/utils/hwSigners";
 import algosdk from "algosdk";
 import { signCompressed } from "falcon-1024";
-import { AlgorandApp } from "ledger-algorand-js";
 
 class SignTxnsError extends Error {
   code: number;
@@ -31,21 +31,37 @@ export async function signer(
   password?: string,
   msig?: LuteMsig
 ) {
-  let transport;
-  let algoApp;
+  const hwSigners = new Map<HardwareVendor, AlgorandHardwareSigner>();
+  async function getHwSigner(vendor: HardwareVendor) {
+    let s = hwSigners.get(vendor);
+    if (!s) {
+      s = await createHardwareSigner(vendor);
+      hwSigners.set(vendor, s);
+    }
+    return s;
+  }
   try {
     const store = useAppStore();
     const signedTxns: Uint8Array[] = [];
     const seeds: Uint8Array[] = [];
+
+    type HwGroupItem = {
+      idx: number;
+      txn: algosdk.Transaction;
+      addr: string;
+    };
+    const trezorGroups = new Map<string, HwGroupItem[]>();
+
     for (const [idx, txn] of txnGroup.entries()) {
       if (!indexesToSign || indexesToSign.includes(idx)) {
         const sender = txn.sender.toString();
-        const addr =
+        const info = store.info.find((i) => i.address === sender);
+        const authAddr =
           msig?.signerAddr ||
           authAddrs?.[idx] ||
-          store.info.find((i) => i.address === sender)?.authAddr?.toString() ||
+          info?.authAddr?.toString() ||
           sender;
-        const acct = store.acctInfo.find((a) => a.addr === addr);
+        const acct = store.acctInfo.find((a) => a.addr === authAddr);
         if (!acct) throw Error("Account Not Found");
         let sig: Uint8Array;
         if (acct.seedId) {
@@ -84,44 +100,71 @@ export async function signer(
             const arg = signCompressed(falconPair.privateKey, txn.rawTxID());
             const logicSig = new algosdk.LogicSigAccount(lsigBytes, [arg]);
             const slstxn = algosdk.signLogicSigTransactionObject(txn, logicSig);
-            signedTxns.push(slstxn.blob);
+            signedTxns[idx] = slstxn.blob;
             continue;
           }
-        } else if (acct.slot != null) {
-          if (!transport) {
-            await store.getDevices();
-            const t = store.device.transport;
-            if (!t) throw Error("This browser does not support Ledger");
-            const hidOrUsb = t === "hid" ? TransportWebHID : TransportWebUSB;
-            const firstDevice = store.device.list[0] as HIDDevice & USBDevice;
-            if (firstDevice && !store.ledgerSelect) {
-              transport = await hidOrUsb.open(firstDevice);
-            } else {
-              store.device.showSelector = true;
-              const device = await selectDevice();
-              store.device.showSelector = false;
-              transport = await hidOrUsb.open(device);
+        } else if (acct.slot != null && acct.vendor) {
+          if (acct.vendor === "trezor") {
+            // Firmware requires tx.sender == derived signer; reject rekey.
+            if (sender !== acct.addr) {
+              throw Error(
+                "Trezor does not yet support signing rekeyed transactions",
+                { cause: 4300 }
+              );
             }
+            const key = `${acct.addr}:${Buffer.from(txn.group ?? new Uint8Array()).toString("base64")}`;
+            if (!trezorGroups.has(key)) trezorGroups.set(key, []);
+            trezorGroups.get(key)!.push({ idx, txn, addr: authAddr });
+            continue;
           }
-          if (!algoApp) algoApp = new AlgorandApp(transport);
-          sig = await ledgerSign(txn, algoApp, acct.slot);
+          const hw = await getHwSigner(acct.vendor);
+          sig = await hw.signTx(acct.slot, txn.toByte());
+        } else if (acct.slot != null) {
+          // Legacy hardware account with no vendor stamped; treat as Ledger.
+          const hw = await getHwSigner("ledger");
+          sig = await hw.signTx(acct.slot, txn.toByte());
         } else {
-          sig = await hotSign(addr, txn.bytesToSign());
+          sig = await hotSign(authAddr, txn.bytesToSign());
         }
         let signedTxn: Uint8Array;
         if (msig?.bypass) {
           signedTxn = attachMsigSig(msig, txn, sig);
         } else {
-          signedTxn = txn.attachSignature(addr, sig);
+          signedTxn = txn.attachSignature(authAddr, sig);
         }
-        signedTxns.push(signedTxn);
+        signedTxns[idx] = signedTxn;
       }
     }
+
+    // Flush pending Trezor groups: for size>=2 use signTxGroup; single → signTx.
+    for (const items of trezorGroups.values()) {
+      const first = items[0]!;
+      const acct = store.acctInfo.find((a) => a.addr === first.addr)!;
+      const hw = (await getHwSigner("trezor")) as AlgorandHardwareSigner;
+      const sigs =
+        items.length === 1
+          ? [await hw.signTx(acct.slot!, first.txn.toByte())]
+          : await hw.signTxGroup(
+              acct.slot!,
+              items.map((it) => it.txn.toByte())
+            );
+      for (let i = 0; i < items.length; i++) {
+        const { idx, txn, addr } = items[i]!;
+        const sig = sigs[i]!;
+        if (!sig || sig.length === 0) continue;
+        const signedTxn = msig?.bypass
+          ? attachMsigSig(msig, txn, sig)
+          : txn.attachSignature(addr, sig);
+        signedTxns[idx] = signedTxn;
+      }
+    }
+
     seeds.forEach((s) => s.fill(0));
-    await transport?.close();
-    return signedTxns;
+    for (const hw of hwSigners.values()) await hw.close();
+    // Compact (drop undefined slots from unsigned indexes).
+    return signedTxns.filter((t) => t != null) as Uint8Array[];
   } catch (err) {
-    await transport?.close();
+    for (const hw of hwSigners.values()) await hw.close();
     throw err;
   }
 }
@@ -154,25 +197,6 @@ export async function hotSign(addr: string, bytes: Uint8Array) {
     Buffer.from(bytes)
   );
   return new Uint8Array(sig);
-}
-
-async function ledgerSign(
-  txn: algosdk.Transaction,
-  algoApp: AlgorandApp,
-  slot: number
-) {
-  const store = useAppStore();
-  store.setSnackbar("Review on Ledger...", "info", -1);
-  let signature: Buffer;
-  try {
-    ({ signature } = await algoApp.sign(slot, Buffer.from(txn.toByte())));
-  } catch (err: any) {
-    if (err.message.includes("rejected")) {
-      throw Error("User Rejected Request", { cause: 4001 });
-    } else throw err;
-  }
-  const sig = new Uint8Array(signature);
-  return sig;
 }
 
 export async function luteSigner(
