@@ -189,7 +189,16 @@ export const useAppStore = defineStore("app", {
       this.networkName =
         this.allNetworks.find((n) => n.name === nn)?.name || networks[0]!.name;
       this.sandboxRouter = await get("app", "sandboxRouter");
-      this.accounts = (await get("app", "accounts")) || [];
+      const storedAccounts: LuteAccount[] = (await get("app", "accounts")) || [];
+      let migrated = false;
+      for (const a of storedAccounts) {
+        if (a.slot != null && !a.seedId && !a.vendor) {
+          a.vendor = "ledger";
+          migrated = true;
+        }
+      }
+      if (migrated) await set("app", "accounts", deepClone(storedAccounts));
+      this.accounts = storedAccounts;
       this.debug = (await get("app", "debug")) ?? this.debug;
       this.snoop = (await get("app", "snoop")) ?? this.snoop;
       this.ledgerSelect =

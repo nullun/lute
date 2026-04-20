@@ -223,6 +223,8 @@ export interface AccountHD extends modelsv2.Account {
   addrIdx?: number;
 }
 
+export type HardwareVendor = "ledger" | "trezor";
+
 export interface LuteAccount {
   addr: Address;
   name?: string;
@@ -236,6 +238,8 @@ export interface LuteAccount {
     counter: number;
     publicKey: string;
   };
+  vendor?: HardwareVendor;
+  deviceModel?: string;
 }
 
 export interface AccountInfo extends LuteAccount {
