@@ -31,6 +31,28 @@
           <v-card variant="outlined" color="primary" class="pointer">
             <v-container
               :class="theme.name.value == 'light' ? 'text-black' : 'text-white'"
+              @click="alertSelect(TREZOR)"
+            >
+              <v-row>
+                <v-col align-self="center" cols="auto">
+                  <trezor-icon color="currentColor" />
+                </v-col>
+                <v-col>
+                  {{ TREZOR }}
+                  <v-chip text="Beta" size="small" class="ml-1" />
+                  <div class="text-grey">
+                    Attach your Trezor via USB running the Algorand-enabled
+                    firmware
+                  </div>
+                </v-col>
+              </v-row>
+            </v-container>
+          </v-card>
+        </v-container>
+        <v-container>
+          <v-card variant="outlined" color="primary" class="pointer">
+            <v-container
+              :class="theme.name.value == 'light' ? 'text-black' : 'text-white'"
               @click="type = HD"
             >
               <v-row>
@@ -145,6 +167,7 @@
       </v-container>
       <h-d-wallet v-else-if="type === HD" @close="show = false" />
       <ledger v-else-if="type === LEDGER" @close="show = false" />
+      <trezor v-else-if="type === TREZOR" @close="show = false" />
       <multi-sig v-else-if="type === MSIG" @close="show = false" />
       <watch v-else-if="type === WATCH" @close="show = false" />
       <hot v-else-if="type === HOT" @close="show = false" />
@@ -171,6 +194,7 @@ const theme = useTheme();
 const type = ref();
 
 const LEDGER = "Ledger Account";
+const TREZOR = "Trezor Account";
 const WATCH = "Watch Account";
 const HD = "HD Wallet";
 const MSIG = "Multi-Sig Account";

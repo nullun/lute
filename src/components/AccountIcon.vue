@@ -14,6 +14,9 @@
     size="small"
     class="mr-1"
   />
+  <v-icon v-else-if="item.vendor === 'trezor'" class="pr-1">
+    <trezor-icon :width="18" color="currentColor" />
+  </v-icon>
   <v-icon v-else-if="item.slot != null" class="pr-1">
     <ledger-icon :width="18" color="currentColor" />
   </v-icon>
