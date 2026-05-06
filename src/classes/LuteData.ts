@@ -97,7 +97,7 @@ export default class LuteData {
         "request-id": z.string().optional(),
         chain_id: z.literal("283"),
         resources: z.string().array().optional(),
-        type: z.literal("ed25519"),
+        type: z.enum(["ed25519", "falcon"]),
       });
 
       switch (this.metadata.encoding) {

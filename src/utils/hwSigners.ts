@@ -15,14 +15,23 @@ import {
   TransportError,
   ProtocolError,
   InvalidGroupError,
+  SignatureType,
 } from "trezor-algorand-js";
 
 export interface AlgorandHardwareSigner {
   vendor: HardwareVendor;
   deviceModel?: string;
   getAddress(slot: number): Promise<string>;
-  signTx(slot: number, tx: Uint8Array): Promise<Uint8Array>;
-  signTxGroup(slot: number, txs: Uint8Array[]): Promise<Uint8Array[]>;
+  signTx(
+    slot: number,
+    tx: Uint8Array,
+    signatureType?: SignatureType
+  ): Promise<Uint8Array>;
+  signTxGroup(
+    slot: number,
+    txs: Uint8Array[],
+    signatureType?: SignatureType
+  ): Promise<Uint8Array[]>;
   close(): Promise<void>;
 }
 
@@ -127,21 +136,22 @@ class TrezorSigner implements AlgorandHardwareSigner {
     }
   }
 
-  async signTx(slot: number, tx: Uint8Array): Promise<Uint8Array> {
+  async signTx(slot: number, tx: Uint8Array, signatureType?: SignatureType): Promise<Uint8Array> {
     const store = useAppStore();
     store.setSnackbar("Review on Trezor...", "info", -1);
     try {
       return await this.client.signTx({
         path: defaultAlgorandPath(slot),
         tx,
+        signatureType,
       });
     } catch (err) {
       throw mapTrezorError(err);
     }
   }
 
-  async signTxGroup(slot: number, txs: Uint8Array[]): Promise<Uint8Array[]> {
-    if (txs.length === 1) return [await this.signTx(slot, txs[0]!)];
+  async signTxGroup(slot: number, txs: Uint8Array[], signatureType?: SignatureType): Promise<Uint8Array[]> {
+    if (txs.length === 1) return [await this.signTx(slot, txs[0]!, signatureType)];
     if (txs.length > 16) {
       throw Error(
         "Trezor supports signing at most 16 transactions per group",
@@ -154,6 +164,7 @@ class TrezorSigner implements AlgorandHardwareSigner {
       return await this.client.signTxGroup({
         path: defaultAlgorandPath(slot),
         txs,
+        signatureType,
       });
     } catch (err) {
       throw mapTrezorError(err);

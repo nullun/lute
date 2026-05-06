@@ -11,6 +11,7 @@ import {
 } from "@/utils/hwSigners";
 import algosdk from "algosdk";
 import { signCompressed } from "falcon-1024";
+import { SignatureType, compileFalconLogicSig } from "trezor-algorand-js";
 
 class SignTxnsError extends Error {
   code: number;
@@ -141,21 +142,37 @@ export async function signer(
       const first = items[0]!;
       const acct = store.acctInfo.find((a) => a.addr === first.addr)!;
       const hw = (await getHwSigner("trezor")) as AlgorandHardwareSigner;
+      const isFalcon = !!acct.falcon;
+      const sigType = isFalcon
+        ? SignatureType.FALCON_DET1024
+        : SignatureType.ED25519;
       const sigs =
         items.length === 1
-          ? [await hw.signTx(acct.slot!, first.txn.toByte())]
+          ? [await hw.signTx(acct.slot!, first.txn.toByte(), sigType)]
           : await hw.signTxGroup(
               acct.slot!,
-              items.map((it) => it.txn.toByte())
+              items.map((it) => it.txn.toByte()),
+              sigType
             );
       for (let i = 0; i < items.length; i++) {
         const { idx, txn, addr } = items[i]!;
         const sig = sigs[i]!;
         if (!sig || sig.length === 0) continue;
-        const signedTxn = msig?.bypass
-          ? attachMsigSig(msig, txn, sig)
-          : txn.attachSignature(addr, sig);
-        signedTxns[idx] = signedTxn;
+        if (isFalcon && acct.falcon) {
+          // Wrap FALCON signature in a LogicSig program
+          const program = compileFalconLogicSig({
+            publicKey: Buffer.from(acct.falcon.publicKey, "base64"),
+            counter: acct.falcon.counter,
+          });
+          const logicSig = new algosdk.LogicSigAccount(program, [sig]);
+          const slstxn = algosdk.signLogicSigTransactionObject(txn, logicSig);
+          signedTxns[idx] = slstxn.blob;
+        } else {
+          const signedTxn = msig?.bypass
+            ? attachMsigSig(msig, txn, sig)
+            : txn.attachSignature(addr, sig);
+          signedTxns[idx] = signedTxn;
+        }
       }
     }
 

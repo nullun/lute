@@ -365,5 +365,5 @@ export interface Siwa {
   "request-id"?: string;
   chain_id: "283";
   resources?: string[];
-  type: "ed25519";
+  type: "ed25519" | "falcon";
 }
