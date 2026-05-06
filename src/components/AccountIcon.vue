@@ -14,9 +14,12 @@
     size="small"
     class="mr-1"
   />
-  <v-icon v-else-if="item.vendor === 'trezor'" class="pr-1">
-    <trezor-icon :width="18" color="currentColor" />
-  </v-icon>
+  <span v-else-if="item.vendor === 'trezor'" class="icon-wrapper pr-1">
+    <v-icon>
+      <trezor-icon :width="18" color="currentColor" />
+    </v-icon>
+    <span v-if="item.falcon" class="pq-badge">PQ</span>
+  </span>
   <v-icon v-else-if="item.slot != null" class="pr-1">
     <ledger-icon :width="18" color="currentColor" />
   </v-icon>
@@ -38,3 +41,25 @@ import {
 
 defineProps<{ item: AccountInfo }>();
 </script>
+
+<style scoped>
+.icon-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.pq-badge {
+  position: absolute;
+  top: -4px;
+  right: -2px;
+  background-color: #9c27b0;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 6px;
+  pointer-events: none;
+}
+</style>
