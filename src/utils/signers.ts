@@ -137,7 +137,9 @@ export async function signer(
       }
     }
 
-    // Flush pending Trezor groups: for size>=2 use signTxGroup; single → signTx.
+    // Flush pending Trezor groups.
+    // The device validates the groupID by hashing all provided transactions,
+    // so always send the full atomic group regardless of signature type.
     for (const items of trezorGroups.values()) {
       const first = items[0]!;
       const acct = store.acctInfo.find((a) => a.addr === first.addr)!;
@@ -146,20 +148,41 @@ export async function signer(
       const sigType = isFalcon
         ? SignatureType.FALCON_DET1024
         : SignatureType.ED25519;
-      const sigs =
-        items.length === 1
-          ? [await hw.signTx(acct.slot!, first.txn.toByte(), sigType)]
-          : await hw.signTxGroup(
-              acct.slot!,
-              items.map((it) => it.txn.toByte()),
-              sigType
-            );
-      for (let i = 0; i < items.length; i++) {
-        const { idx, txn, addr } = items[i]!;
-        const sig = sigs[i]!;
+
+      if (txnGroup.length > 1) {
+        // Send the entire atomic group so the device can validate the groupID.
+        // It returns signatures only for transactions matching the signer;
+        // empty signatures for the rest.
+        const sigs = await hw.signTxGroup(
+          acct.slot!,
+          txnGroup.map((t) => t.toByte()),
+          sigType
+        );
+        for (const { idx, addr } of items) {
+          const sig = sigs[idx];
+          if (!sig || sig.length === 0) continue;
+          const txn = txnGroup[idx]!;
+          if (isFalcon && acct.falcon) {
+            const program = compileFalconLogicSig({
+              publicKey: Buffer.from(acct.falcon.publicKey, "base64"),
+              counter: acct.falcon.counter,
+            });
+            const logicSig = new algosdk.LogicSigAccount(program, [sig]);
+            const slstxn = algosdk.signLogicSigTransactionObject(txn, logicSig);
+            signedTxns[idx] = slstxn.blob;
+          } else {
+            const signedTxn = msig?.bypass
+              ? attachMsigSig(msig, txn, sig)
+              : txn.attachSignature(addr, sig);
+            signedTxns[idx] = signedTxn;
+          }
+        }
+      } else {
+        // Single transaction (no group) — use signTx directly.
+        const sig = await hw.signTx(acct.slot!, first.txn.toByte(), sigType);
         if (!sig || sig.length === 0) continue;
+        const { idx, txn, addr } = first;
         if (isFalcon && acct.falcon) {
-          // Wrap FALCON signature in a LogicSig program
           const program = compileFalconLogicSig({
             publicKey: Buffer.from(acct.falcon.publicKey, "base64"),
             counter: acct.falcon.counter,
